@@ -10,19 +10,28 @@ logger = logging.getLogger(__name__)
 
 class OptimizeStyleTransfer:
     def __init__(self,
-                 learning_rate=0.001):
+                 learning_rate=0.001,
+                 model="VGG19",
+                 content_layer=('block5_conv2',),
+                 style_layer=('block1_conv1',
+                              'block2_conv1',
+                              'block3_conv1',
+                              'block4_conv1',
+                              'block5_conv1')):
         self._lr = learning_rate
 
         self._optimizer = tf.keras.optimizers.Adam(self._lr)
 
         # build model
-        pretrain_model = tf.keras.applications.VGG19(include_top=False)
-        content_layer = ['block5_conv2']
-        style_layer = ['block1_conv1',
-                       'block2_conv1',
-                       'block3_conv1',
-                       'block4_conv1',
-                       'block5_conv1']
+        if model == "VGG19":
+            pretrain_model = tf.keras.applications.VGG19(include_top=False)
+        elif model == "InceptionV3":
+            pretrain_model = tf.keras.applications.InceptionV3(include_top=False)
+        elif isinstance(model, tf.keras.Model):
+            pretrain_model = model
+        else:
+            raise ValueError
+
         self._model = tf.keras.Model(inputs=pretrain_model.input,
                                      outputs=[pretrain_model.get_layer(name).output for name in
                                               style_layer + content_layer])
@@ -95,13 +104,16 @@ class OptimizeStyleTransfer:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
-    my_style_image = cv2.imread("../assets/style_image_1.jpg")
+    my_style_image = cv2.imread("../assets/starry_night.jpg")
     my_style_image = cv2.resize(my_style_image, (500, 500))
-    my_content_image = cv2.imread("../assets/content_image.jpg")
+    my_content_image = cv2.imread("../assets/paint_blue_sky.jpg")
     my_content_image = cv2.resize(my_content_image, (500, 500))
 
     my_model = OptimizeStyleTransfer(0.02)
-    gen_image = my_model.train(my_content_image, my_style_image, 1000)
+    gen_image = my_model.train(my_content_image, my_style_image, 100)
     stack_result = np.concatenate([my_content_image, my_style_image, gen_image], axis=1)
+
+    cv2.imwrite("../result.jpg", stack_result)
+
     cv2.imshow("result", stack_result)
     cv2.waitKey(0)
