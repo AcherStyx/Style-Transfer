@@ -1,5 +1,6 @@
-import logging
 import cv2
+import logging
+import argparse
 import tensorflow as tf
 import numpy as np
 
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class OptimizeStyleTransfer:
     def __init__(self,
-                 learning_rate=0.001,
+                 learning_rate=0.01,
                  model="VGG19",
                  content_layer=('block5_conv2',),
                  style_layer=('block1_conv1',
@@ -53,7 +54,7 @@ class OptimizeStyleTransfer:
             )
         return tf.add_n(loss)
 
-    def train(self, content_image, style_image, step):
+    def train(self, content_image, style_image, step, preview=False):
         content_image = tf.expand_dims(
             tf.convert_to_tensor(tf.keras.applications.inception_v3.preprocess_input(content_image)), axis=0)
         style_image = tf.expand_dims(
@@ -83,8 +84,14 @@ class OptimizeStyleTransfer:
             gradients = tape.gradient(loss, transfer_image)
             self._optimizer.apply_gradients([(gradients, transfer_image)])
 
-            self._show_tensor_image(transfer_image)
+            if preview:
+                self._show_tensor_image(transfer_image)
             bar.set_postfix({"loss": loss.numpy()})
+
+        try:
+            cv2.destroyWindow("tensor_image")
+        except cv2.error:
+            pass
 
         return ((tf.clip_by_value(transfer_image, -1, 1)[0] + 1) * 127.5).numpy().astype(np.uint8)
 
@@ -102,18 +109,42 @@ class OptimizeStyleTransfer:
         cv2.waitKey(1)
 
 
+def main(style_image_file, content_image_file, output_image_file,
+         stack_output_image_file=None, step=100, resize=(500, 500), learning_rate=0.02):
+    style_image = cv2.imread(style_image_file)
+    style_image = cv2.resize(style_image, resize)
+    content_image = cv2.imread(content_image_file)
+    content_image = cv2.resize(content_image, resize)
+
+    my_model = OptimizeStyleTransfer(learning_rate)
+
+    gen_image = my_model.train(content_image, style_image, step)
+    cv2.imwrite(output_image_file, gen_image)
+
+    if stack_output_image_file is not None:
+        stack_result = np.concatenate([content_image, style_image, gen_image], axis=1)
+        cv2.imwrite(stack_output_image_file, stack_result)
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
-    my_style_image = cv2.imread("../assets/starry_night.jpg")
-    my_style_image = cv2.resize(my_style_image, (500, 500))
-    my_content_image = cv2.imread("../assets/paint_blue_sky.jpg")
-    my_content_image = cv2.resize(my_content_image, (500, 500))
 
-    my_model = OptimizeStyleTransfer(0.02)
-    gen_image = my_model.train(my_content_image, my_style_image, 100)
-    stack_result = np.concatenate([my_content_image, my_style_image, gen_image], axis=1)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--style", "-s", type=str, help="Style image", required=True)
+    parser.add_argument("--content", "-c", type=str, help="Content image", required=True)
+    parser.add_argument("--output", "-o", type=str, help="Output image", required=True)
+    parser.add_argument("--stack_output", type=str,
+                        help="Save output image stack with style and content image for comparison")
+    parser.add_argument("--resize", type=str, help="Resize image", default="500,500")
+    parser.add_argument("--step", type=int, help="Train step", default=100)
+    parser.add_argument("--lr", "--learning_rate", help="Learning rate", default=0.02)
+    args = parser.parse_args()
 
-    cv2.imwrite("../result.jpg", stack_result)
-
-    cv2.imshow("result", stack_result)
-    cv2.waitKey(0)
+    main(style_image_file=args.style,
+         content_image_file=args.content,
+         output_image_file=args.output,
+         stack_output_image_file=args.stack_output,
+         step=args.step,
+         resize=tuple([int(x) for x in args.resize.split(',')]),
+         learning_rate=args.lr)
+    print("Done!")
